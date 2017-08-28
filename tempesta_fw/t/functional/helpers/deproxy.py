@@ -586,7 +586,11 @@ class Server(asyncore.dispatcher):
             host = 'Client'
         self.ip = tf_cfg.cfg.get('Client', 'ip')
         tf_cfg.dbg(4, '\tDeproxy: Server: Start on %s:%d.' % (self.ip, port))
-        self.setup()
+        try:
+            self.setup()
+        except:
+            error.bug("Can't start Deproxy on %s:%d" % (self.ip, port))
+
 
     def setup(self):
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)

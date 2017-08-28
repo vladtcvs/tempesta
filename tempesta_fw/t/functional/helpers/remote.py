@@ -66,7 +66,7 @@ class LocalNode(Node):
                               stderr=stderr_pipe, env=env_full) as p:
             try:
                 stdout, stderr = p.communicate(timeout)
-                assert p.returncode == 0, "Return code is not 0."
+                assert p.returncode == 0, "Return code %d != 0." % p.returncode
             except Exception as e:
                 if not err_msg:
                     err_msg = ("Error running command '%s' on %s" %
@@ -146,7 +146,8 @@ class RemoteNode(Node):
             stdout = out_f.read()
             if not ignore_stderr:
                 stderr = err_f.read()
-            assert out_f.channel.recv_exit_status() == 0, "Return code is not 0."
+            assert out_f.channel.recv_exit_status() == 0, \
+                   "Return code %d != 0." % out_f.channel.recv_exit_status()
         except Exception as e:
             if not err_msg:
                 err_msg = ("Error running command '%s' on %s" %
