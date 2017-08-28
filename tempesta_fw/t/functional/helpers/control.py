@@ -249,7 +249,6 @@ class Tempesta(object):
         self.config = tempesta.Config()
         self.stats = tempesta.Stats()
         self.host = tf_cfg.cfg.get('Tempesta', 'hostname')
-        self.err_msg = ' '.join(["Can't %s TempestaFW on", self.host])
 
     def start(self):
         tf_cfg.dbg(3, '\tStarting TempestaFW on %s' % self.host)
@@ -257,19 +256,21 @@ class Tempesta(object):
         self.node.copy_file(self.config_name, self.config.get_config())
         cmd = '%s/scripts/tempesta.sh --start' % self.workdir
         env = { 'TFW_CFG_PATH': self.config_name }
-        self.node.run_cmd(cmd, timeout=30, env=env, err_msg=(self.err_msg % 'start'))
+        self.node.run_cmd(cmd, timeout=30, env=env,
+                          err_msg="Can't start TempestaFW on %s" % self.host)
 
     def stop(self):
         """ Stop and unload all TempestaFW modules. """
         tf_cfg.dbg(3, '\tStoping TempestaFW on %s' % self.host)
         cmd = '%s/scripts/tempesta.sh --stop' % self.workdir
-        self.node.run_cmd(cmd, timeout=30, err_msg=(self.err_msg % 'stop'))
+        self.node.run_cmd(cmd, timeout=30,
+                          err_msg="Can't stop TempestaFW on %s" % self.host)
         self.node.remove_file(self.config_name)
 
     def get_stats(self):
         cmd = 'cat /proc/tempesta/perfstat'
-        stdout, _ = self.node.run_cmd(cmd,
-                                      err_msg=(self.err_msg % 'get stats of'))
+        stdout, _ = self.node.run_cmd(
+            cmd, err_msg="Can't get stats of TempestaFW on %s" % self.host)
         self.stats.parse(stdout)
 
 #-------------------------------------------------------------------------------
@@ -286,7 +287,6 @@ class Nginx(object):
         self.clear_stats()
         # Configure number of connections used by TempestaFW.
         self.conns_n = tempesta.server_conns_default()
-        self.err_msg = "Can't %s Nginx on %s"
         self.active_conns = 0
         self.requests = 0
 
@@ -303,7 +303,7 @@ class Nginx(object):
         config_file = os.path.join(self.workdir, self.config.config_name)
         cmd = ' '.join([tf_cfg.cfg.get('Server', 'nginx'), '-c', config_file])
         self.node.run_cmd(cmd, ignore_stderr=True,
-                          err_msg=(self.err_msg % ('start', self.get_name())))
+                          err_msg="Can't start Nginx on %s" % self.get_name())
 
     def stop(self):
         tf_cfg.dbg(3, '\tStoping Nginx on %s' % self.get_name())
@@ -316,7 +316,7 @@ class Nginx(object):
             'while [ -e \'/proc/$pid\' ]; do sleep 1; done'
         ])
         self.node.run_cmd(cmd, ignore_stderr=True,
-                          err_msg=(self.err_msg % ('stop', self.get_name())))
+                          err_msg="Can't stop Nginx on %s" % self.get_name())
         self.node.remove_file(config_file)
 
     def get_stats(self):
@@ -329,7 +329,7 @@ class Nginx(object):
         uri = 'http://%s:%d/nginx_status' % (self.node.host, self.config.port)
         cmd = 'curl %s' % uri
         out, _ = remote.client.run_cmd(
-            cmd, err_msg=(self.err_msg % ('get stats of', self.get_name())))
+            cmd, err_msg="Can't get stats of Nginx on %s" % self.get_name())
         m = re.search(r'Active connections: (\d+) \n'
                       r'server accepts handled requests\n \d+ \d+ (\d+)',
                       out)
