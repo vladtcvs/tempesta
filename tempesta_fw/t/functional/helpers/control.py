@@ -315,7 +315,7 @@ class Nginx(object):
             'kill -s TERM $pid',
             'while [ -e \'/proc/$pid\' ]; do sleep 1; done'
         ])
-        self.node.run_cmd(cmd, ignore_stderr=True,
+        self.node.run_cmd(cmd,
                           err_msg="Can't stop Nginx on %s" % self.get_name())
         self.node.remove_file(config_file)
 
