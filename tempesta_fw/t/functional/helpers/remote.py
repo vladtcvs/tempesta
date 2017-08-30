@@ -168,11 +168,9 @@ class RemoteNode(Node):
             self.mkdir(dirname)
 
         try:
-            sftp = self.ssh.open_sftp()
-            sfile = sftp.file(filename, 'w', -1)
-            sfile.write(content)
-            sfile.flush()
-            sftp.close()
+            with self.ssh.open_sftp() as sftp, \
+                 sftp.file(filename, 'w', -1) as sfile:
+                    sfile.write(content)
         except Exception as e:
             error.bug(("Error copying file %s to %s" %
                        (filename, self.host)))
