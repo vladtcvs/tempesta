@@ -7,6 +7,10 @@ import abc
 import paramiko
 import errno
 import subprocess32 as subprocess
+import select
+import fcntl
+import threading
+from time import sleep
 from . import tf_cfg, error
 
 __author__ = 'Tempesta Technologies, Inc.'
@@ -17,6 +21,82 @@ __license__ = 'GPL2'
 DEBUG_FILES = False
 # Default timeout for SSH sessions and command processing.
 DEFAULT_TIMEOUT = 5
+
+def _set_nonblock_flag(fd, nonblock=True):
+    nonblock_flag = os.O_NONBLOCK
+    old = fcntl.fcntl(fd, fcntl.F_GETFL)
+    if nonblock:
+        fcntl.fcntl(fd, fcntl.F_SETFL, old | nonblock_flag)
+    else:
+        fcntl.fcntl(fd, fcntl.F_SETFL, old & ~nonblock_flag)
+
+def _set_cloexec_flag(fd, cloexec=True):
+    cloexec_flag = fcntl.FD_CLOEXEC
+    old = fcntl.fcntl(fd, fcntl.F_GETFD)
+    if cloexec:
+        fcntl.fcntl(fd, fcntl.F_SETFD, old | cloexec_flag)
+    else:
+        fcntl.fcntl(fd, fcntl.F_SETFD, old & ~cloexec_flag)
+
+def _pipe_file():
+    try:
+        pipe_fds = os.pipe()
+        map(_set_cloexec_flag, pipe_fds)
+        pipe_files = map(os.fdopen, pipe_fds, ('r', 'w'))
+        return pipe_files
+    except:
+        map(os.close, pipe_fds)
+        raise
+
+def _read_thread_primitive(buffer, file):
+    buffer.append(file.read())
+
+#
+# Read from multiple fds, multiplexed with poll(), until EOF on _some_ of these
+# fds.
+#
+def _read_thread_poll(*file2buf2waiteof):
+    fd2file = dict()
+    fd2buffer = dict()
+    # fds for which we need an eof
+    fd2eof = set()
+    poller = select.poll()
+
+    for file, buffer, wait_eof in file2buf2waiteof:
+        if hasattr(file, 'channel'):
+            # workaround for paramiko's ChannelFile
+            fd = file.channel.fileno()
+        else:
+            fd = file.fileno()
+        fd2file[fd] = file
+        fd2buffer[fd] = buffer
+        # build a full set and an inverse set
+        if wait_eof:
+            fd2eof.add(fd)
+        _set_nonblock_flag(fd)
+        poller.register(fd, select.POLLIN)
+
+    while fd2eof:
+        try:
+            ready = poller.poll()
+        except select.error as e:
+            if e.errno == errno.EINTR:
+                continue
+            raise
+
+        for fd, revents in ready:
+            if revents & select.POLLIN:
+                fd2buffer[fd].append(fd2file[fd].read())
+            elif revents & select.POLLHUP:
+                # this `elif` is important because we do not want to unwatch an
+                # fd which still has data
+                fd2eof.discard(fd)
+                poller.unregister(fd)
+                fd2file.pop(fd).close()
+
+    for fd, file_obj in fd2file.iteritems():
+        poller.unregister(fd)
+        file_obj.close()
 
 class Node(object):
     __metaclass__ = abc.ABCMeta
@@ -56,17 +136,40 @@ class LocalNode(Node):
         tf_cfg.dbg(4, "\tRun command '%s' on host %s with environment %s" % (cmd, self.host, env))
         stdout = ''
         stderr = ''
-        stderr_pipe = (open(os.devnull, 'w') if ignore_stderr
-                       else subprocess.PIPE)
         # Popen() expects full environment
         env_full = {}
         env_full.update(os.environ)
         env_full.update(env)
         with subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
-                              stderr=stderr_pipe, env=env_full) as p:
+                              stderr=subprocess.PIPE, env=env_full) as p:
+            # Now this is where the fun begins. `ignore_stderr` means that
+            # the process does not close stderr after daemonization, so plain
+            # communicate() will simply block indefinitely. There is nothing we
+            # can do about this in a proper race-free way, but what we _can_ do
+            # is to read everything from stderr until daemonization.
+            # For that, we basically reimplement communicate() with a single
+            # difference: we do not wait for EOF on the stderr pipe. For that,
+            # we turn the fds into non-blocking mode, create a canary pipe, then
+            # launch a thread with poll() on these fds and the read end of the
+            # canary pipe, then wait for process termination and finally tell
+            # the thread to quit by closing the write end of the canary pipe.
             try:
-                stdout, stderr = p.communicate(timeout)
+                stderr_buf = []
+                stdout_buf = []
+                canary_r, canary_w = _pipe_file()
+                thread = threading.Thread(
+                    target=_read_thread_poll,
+                    args=((canary_r, None, True),
+                          (p.stdout, stdout_buf, True),
+                          (p.stderr, stderr_buf, not ignore_stderr))
+                )
+                thread.start()
+                p.wait()
+                canary_w.close()
+                thread.join()
+                stdout, stderr = map(''.join, (stdout_buf, stderr_buf))
                 assert p.returncode == 0, "Return code %d != 0." % p.returncode
+
             except Exception as e:
                 if not err_msg:
                     err_msg = ("Error running command '%s' on %s" %
@@ -142,12 +245,30 @@ class RemoteNode(Node):
             ])
             tf_cfg.dbg(4, "\tEffective command '%s' after injecting environment" % cmd)
         try:
+            # See LocalNode.run_cmd() for details. With SSH, it is slightly
+            # easier: the SSH server closes the channel once the command exits,
+            # so we do not care about `ignore_stderr` and just reimplement
+            # Popen.communicate() here. Due to the brain-dead way in which
+            # paramiko supports polling its channels, we do not use poll() here
+            # but simply spawn a thread for each stream and just read those
+            # in blocking mode.
             _, out_f, err_f = self.ssh.exec_command(cmd, timeout=timeout)
-            stdout = out_f.read()
-            if not ignore_stderr:
-                stderr = err_f.read()
-            assert out_f.channel.recv_exit_status() == 0, \
-                   "Return code %d != 0." % out_f.channel.recv_exit_status()
+            files = (out_f, err_f)
+            buffers = ([], [])
+            threads = map(
+                lambda buffer, file: threading.Thread(
+                    target=_read_thread_primitive,
+                    args=(buffer, file)
+                ),
+                buffers,
+                files
+            )
+            map(threading.Thread.start, threads)
+            exit_status = out_f.channel.recv_exit_status()
+            map(threading.Thread.join, threads)
+            stdout, stderr = map(''.join, buffers)
+            assert exit_status == 0, "Return code %d != 0." % exit_status
+
         except Exception as e:
             if not err_msg:
                 err_msg = ("Error running command '%s' on %s" %
