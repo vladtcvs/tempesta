@@ -63,10 +63,17 @@ class StressTest(unittest.TestCase):
         """
         # Call functions only if variables not None: there might be an error
         # before tempesta would be created.
-        if self.tempesta:
-            self.tempesta.stop()
-        if self.servers:
-            control.servers_stop(self.servers)
+        try:
+            if self.tempesta:
+                self.tempesta.stop()
+        except:
+            tf_cfg.dbg(1, "Exception in stopping tempesta")
+
+        try:
+            if self.servers:
+                control.servers_stop(self.servers)
+        except:
+            tf_cfg.dbg(1, "Exception in stopping servers")
 
     def show_performance(self):
         if tf_cfg.v_level() < 2:

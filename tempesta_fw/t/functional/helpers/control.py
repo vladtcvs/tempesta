@@ -261,10 +261,17 @@ class Tempesta(object):
 
     def stop(self):
         """ Stop and unload all TempestaFW modules. """
-        tf_cfg.dbg(3, '\tStoping TempestaFW on %s' % self.host)
-        cmd = '%s/scripts/tempesta.sh --stop' % self.workdir
-        self.node.run_cmd(cmd, timeout=30, err_msg=(self.err_msg % 'stop'))
-        self.node.remove_file(self.config_name)
+        try:
+            tf_cfg.dbg(3, '\tStoping TempestaFW on %s' % self.host)
+            cmd = '%s/scripts/tempesta.sh --stop' % self.workdir
+            self.node.run_cmd(cmd, timeout=30, err_msg=(self.err_msg % 'stop'))
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in stoping Tempesta')
+
+        try:
+            self.node.remove_file(self.config_name)
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in removing Tempesta config')
 
     def get_stats(self):
         cmd = 'cat /proc/tempesta/perfstat'
@@ -354,18 +361,25 @@ class Nginx(object):
                           err_msg=(self.err_msg % ('start', self.get_name())))
 
     def stop(self):
-        tf_cfg.dbg(3, '\tStoping Nginx on %s' % self.get_name())
-        pid_file = os.path.join(self.workdir, self.config.pidfile_name)
-        config_file = os.path.join(self.workdir, self.config.config_name)
-        cmd = ' && '.join([
-            '[ -e \'%s\' ]' % pid_file,
-            'pid=$(cat %s)' % pid_file,
-            'kill -s TERM $pid',
-            'while [ -e \'/proc/$pid\' ]; do sleep 1; done'
-        ])
-        self.node.run_cmd(cmd, ignore_stderr=True,
-                          err_msg=(self.err_msg % ('stop', self.get_name())))
-        self.node.remove_file(config_file)
+        try:
+            tf_cfg.dbg(3, '\tStoping Nginx on %s' % self.get_name())
+            pid_file = os.path.join(self.workdir, self.config.pidfile_name)
+            cmd = ' && '.join([
+                '[ -e \'%s\' ]' % pid_file,
+                'pid=$(cat %s)' % pid_file,
+                'kill -s TERM $pid',
+                'while [ -e \'/proc/$pid\' ]; do sleep 1; done'
+            ])
+            self.node.run_cmd(cmd, ignore_stderr=True,
+                              err_msg=(self.err_msg % ('stop', self.get_name())))
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in stoping Nginx')
+
+        try:
+            config_file = os.path.join(self.workdir, self.config.config_name)
+            self.node.remove_file(config_file)
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in removing Nginx config')
 
     def get_stats(self):
         """ Nginx doesn't have counters for every virtual host. Spawn separate

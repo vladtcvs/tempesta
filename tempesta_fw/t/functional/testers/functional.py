@@ -55,13 +55,24 @@ class FunctionalTest(unittest.TestCase):
 
     def tearDown(self):
         # Close client connection before stopping the TempestaFW.
-        asyncore.close_all()
-        if self.client:
-            self.client.close()
-        if self.tempesta:
-            self.tempesta.stop()
-        if self.tester:
-            self.tester.close_all()
+        try:
+            asyncore.close_all()
+            if self.client:
+                self.client.close()
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in stoping client')
+
+        try:
+            if self.tempesta:
+                self.tempesta.stop()
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in stoping Tempesta')
+
+        try:
+            if self.tester:
+                self.tester.close_all()
+        except:
+            tf_cfg.dbg(1, 'Unknown exception in stop tester')
 
     @classmethod
     def tearDownClass(cls):
