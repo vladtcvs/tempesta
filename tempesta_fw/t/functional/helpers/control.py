@@ -268,26 +268,28 @@ class Tempesta(object):
         self.node.run_cmd(cmd, timeout=30, env=env, err_msg=(self.err_msg % 'start'))
         self.state = "started"
 
-    def stop(self):
-        """ Stop and unload all TempestaFW modules. """
-        if self.state != "started":
-            tf_cfg.dbg(1, "Tempesta not running")
-            return
-
+    def force_stop(self):
+        """ Unconditially stop tempesta """
         try:
             tf_cfg.dbg(3, '\tStoping TempestaFW on %s' % self.host)
             cmd = '%s/scripts/tempesta.sh --stop' % self.workdir
             self.node.run_cmd(cmd, timeout=30, err_msg=(self.err_msg % 'stop'))
-        except:
-            tf_cfg.dbg(1, 'Unknown exception in stoping Tempesta')
+        except Exception as e:
+            tf_cfg.dbg(1, 'Exception in stoping Tempesta: %s' % str(e))
             self.state = "error"
 
         try:
             self.node.remove_file(self.config_name)
-        except:
-            tf_cfg.dbg(1, 'Unknown exception in removing Tempesta config')
+        except Exception as e:
+            tf_cfg.dbg(1, 'Exception in removing Tempesta config: %s' % str(e))
             self.state = "error"
 
+    def stop(self):
+        """ Stop and unload all TempestaFW modules. """
+        if self.state == "stopped":
+            tf_cfg.dbg(1, "Tempesta not running")
+            return
+        self.force_stop()
         if self.state == "started":
             self.state = "stopped"
 
@@ -388,11 +390,8 @@ class Nginx(object):
                           err_msg=(self.err_msg % ('start', self.get_name())))
         self.state = "started"
 
-    def stop(self):
-        if self.state != "started":
-            tf_cfg.dbg(1, "Nginx not running")
-            return
-
+    def force_stop(self):
+        """ Unconditially stop Nginx """
         try:
             tf_cfg.dbg(3, '\tStoping Nginx on %s' % self.get_name())
             pid_file = os.path.join(self.workdir, self.config.pidfile_name)
@@ -415,6 +414,11 @@ class Nginx(object):
             tf_cfg.dbg(1, 'Unknown exception in removing Nginx config')
             self.state = "error"
 
+    def stop(self):
+        if self.state == "stopped":
+            tf_cfg.dbg(1, "Nginx not running")
+            return
+        self.force_stop()
         if self.state == "started":
             self.state = "stopped"
 
@@ -469,5 +473,23 @@ def servers_get_stats(servers):
     threads = __servers_pool_size(len(servers))
     pool = multiprocessing.Pool(threads)
     pool.map(Nginx.get_stats, servers)
+
+def stop_old():
+    """ Stop old instances of Tempesta and Nginx"""
+    try:
+        remote.connect()
+    except Exception as e:
+        tf_cfg.dbg(1, "Can not connect: %s" % str(e))
+        return
+
+    tf_cfg.dbg(1, "Stopping old tempesta")
+    try:
+        tmp_tempesta = Tempesta()
+        tmp_tempesta.force_stop()
+        tf_cfg.dbg(1, "Tempesta stopped")
+    except Exception as e:
+        tf_cfg.dbg(1, "Can not stop tempesta: %s" % str(e))
+
+    tf_cfg.dbg(1, "Stopping old nginx")
 
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4

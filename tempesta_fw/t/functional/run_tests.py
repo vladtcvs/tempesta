@@ -7,7 +7,7 @@ import os
 import resource
 import subprocess
 
-from helpers import tf_cfg, remote, shell
+from helpers import tf_cfg, remote, shell, control
 
 __author__ = 'Tempesta Technologies, Inc.'
 __copyright__ = 'Copyright (C) 2017 Tempesta Technologies, Inc.'
@@ -38,6 +38,7 @@ key, not password. `ssh-copy-id` can be used for that.
 -n, --no-resume                   - Do not resume from state file
 -l, --log <file>                  - Duplcate tests' stderr to this file
 -L, --list                        - List all discovered tests subject to filters
+-C, --clean                       - Stop old instances of Tempesta and Nginx
 
 Non-flag arguments may be used to include/exclude specific tests.
 Specify a dotted-style name or prefix to include every matching test:
@@ -52,13 +53,14 @@ be resumed manually from any given test.
 fail_fast = False
 test_resume = shell.TestResume()
 list_tests = False
+clean_old = False
 
 try:
-    options, remainder = getopt.getopt(sys.argv[1:], 'hvdt:fr:a:nl:L',
+    options, remainder = getopt.getopt(sys.argv[1:], 'hvdt:fr:a:nl:LC',
                                        ['help', 'verbose', 'defaults',
                                         'duration=', 'failfast', 'resume=',
                                         'resume-after=', 'no-resume', 'log=',
-                                        'list'])
+                                        'list', 'clean'])
 
 except getopt.GetoptError as e:
     print(e)
@@ -91,6 +93,8 @@ for opt, arg in options:
         tf_cfg.cfg.config['General']['log_file'] = arg
     elif opt in ('-L', '--list'):
         list_tests = True
+    elif opt in ('-C', '--clean'):
+        clean_old = True
 
 tf_cfg.cfg.check()
 
@@ -164,6 +168,10 @@ tests = [ t
 if list_tests:
     for t in tests:
         print(t.id())
+    sys.exit(0)
+
+if clean_old:
+    control.stop_old()
     sys.exit(0)
 
 #
