@@ -241,6 +241,7 @@ def clients_parallel_load(client, count=None):
 
 
 class Tempesta(object):
+    state = "stopped"
 
     def __init__(self):
         self.node = remote.tempesta
@@ -252,26 +253,43 @@ class Tempesta(object):
         self.err_msg = ' '.join(["Can't %s TempestaFW on", self.host])
 
     def start(self):
+        if self.state == "started":
+            tf_cfg.dbg(1, "Tempesta already started")
+            return
+        if self.state == "error":
+            tf_cfg.dbg(1, "Tempesta in error state")
+            return
+
         tf_cfg.dbg(3, '\tStarting TempestaFW on %s' % self.host)
         self.stats.clear()
         self.node.copy_file(self.config_name, self.config.get_config())
         cmd = '%s/scripts/tempesta.sh --start' % self.workdir
         env = { 'TFW_CFG_PATH': self.config_name }
         self.node.run_cmd(cmd, timeout=30, env=env, err_msg=(self.err_msg % 'start'))
+        self.state = "started"
 
     def stop(self):
         """ Stop and unload all TempestaFW modules. """
+        if self.state != "started":
+            tf_cfg.dbg(1, "Tempesta not running")
+            return
+
         try:
             tf_cfg.dbg(3, '\tStoping TempestaFW on %s' % self.host)
             cmd = '%s/scripts/tempesta.sh --stop' % self.workdir
             self.node.run_cmd(cmd, timeout=30, err_msg=(self.err_msg % 'stop'))
         except:
             tf_cfg.dbg(1, 'Unknown exception in stoping Tempesta')
+            self.state = "error"
 
         try:
             self.node.remove_file(self.config_name)
         except:
             tf_cfg.dbg(1, 'Unknown exception in removing Tempesta config')
+            self.state = "error"
+
+        if self.state == "started":
+            self.state = "stopped"
 
     def get_stats(self):
         cmd = 'cat /proc/tempesta/perfstat'
@@ -332,6 +350,7 @@ class TempestaFI(Tempesta):
 #-------------------------------------------------------------------------------
 
 class Nginx(object):
+    state = "stopped"
 
     def __init__(self, listen_port, workers=1):
         self.node = remote.server
@@ -349,6 +368,14 @@ class Nginx(object):
         return ':'.join([self.ip, str(self.config.port)])
 
     def start(self):
+        if self.state == "started":
+            tf_cfg.dbg(1, "Nginx already started")
+            return
+
+        if self.state == "error":
+            tf_cfg.dbg(1, "Nginx in error state")
+            return
+
         tf_cfg.dbg(3, '\tStarting Nginx on %s' % self.get_name())
         self.clear_stats()
         # Copy nginx config to working directory on 'server' host.
@@ -359,8 +386,13 @@ class Nginx(object):
         cmd = ' '.join([tf_cfg.cfg.get('Server', 'nginx'), '-c', config_file])
         self.node.run_cmd(cmd, ignore_stderr=True,
                           err_msg=(self.err_msg % ('start', self.get_name())))
+        self.state = "started"
 
     def stop(self):
+        if self.state != "started":
+            tf_cfg.dbg(1, "Nginx not running")
+            return
+
         try:
             tf_cfg.dbg(3, '\tStoping Nginx on %s' % self.get_name())
             pid_file = os.path.join(self.workdir, self.config.pidfile_name)
@@ -374,12 +406,17 @@ class Nginx(object):
                               err_msg=(self.err_msg % ('stop', self.get_name())))
         except:
             tf_cfg.dbg(1, 'Unknown exception in stoping Nginx')
+            self.state = "error"
 
         try:
             config_file = os.path.join(self.workdir, self.config.config_name)
             self.node.remove_file(config_file)
         except:
             tf_cfg.dbg(1, 'Unknown exception in removing Nginx config')
+            self.state = "error"
+
+        if self.state == "started":
+            self.state = "stopped"
 
     def get_stats(self):
         """ Nginx doesn't have counters for every virtual host. Spawn separate
