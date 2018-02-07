@@ -77,25 +77,6 @@ class LeakTest(stress.StressTest):
     backend_connections = 10
     memory_leak_thresold = 32*1024 # in kib
 
-    def assert_tempesta(self):
-        """ We don't check that traffic is parsed correctly. Only detect leaks. """
-
-    def assert_clients(self):
-        """ Check only traffic size. We don't need to check responses. """
-        cl_req_cnt = 0
-        cl_conn_cnt = 0
-        for client in self.clients:
-            req, err = client.results()
-            cl_req_cnt += req
-            cl_conn_cnt += client.connections * self.pipelined_req
-        exp_min = cl_req_cnt
-        exp_max = cl_req_cnt + cl_conn_cnt
-        self.assertTrue(
-            self.tempesta.stats.cl_msg_received >= exp_min and
-            self.tempesta.stats.cl_msg_received <= exp_max,
-            "Wrong cl_msg_received"
-        )
-
     def create_servers(self):
         """ Overrirde to create needed amount of upstream servers. """
         port = tempesta.upstream_port_start_from()
