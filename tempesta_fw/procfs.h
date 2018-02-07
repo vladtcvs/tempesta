@@ -74,6 +74,7 @@ typedef struct {
 	TFW_STAT_COMMON;
 	u64	msgs_fromcache;
 	u64	online;
+    u64 failed_backend_conn_attempts;
 } TfwClntStat;
 
 /*

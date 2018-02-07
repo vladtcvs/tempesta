@@ -65,6 +65,7 @@ tfw_perfstat_collect(TfwPerfStat *stat)
 		SADD(clnt.conn_disconnects);
 		SADD(clnt.conn_established);
 		SADD(clnt.rx_bytes);
+        SADD(clnt.failed_backend_conn_attempts);
 
 		/* Server related statistics. */
 		SADD(serv.rx_messages);
@@ -128,6 +129,7 @@ tfw_perfstat_seq_show(struct seq_file *seq, void *off)
 	SPRN("Client messages served from cache\t", clnt.msgs_fromcache);
 	SPRN("Client messages parsing errors\t\t", clnt.msgs_parserr);
 	SPRN("Client messages filtered out\t\t", clnt.msgs_filtout);
+    SPRN("Client messages backend connection errors\t\t", clnt.failed_backend_conn_attempts);
 	SPRN("Client messages other errors\t\t", clnt.msgs_otherr);
 	SPRN("Clients online\t\t\t\t", clnt.online);
 	SPRN("Client connection attempts\t\t", clnt.conn_attempts);
