@@ -2,58 +2,148 @@ __author__ = 'Tempesta Technologies, Inc.'
 __copyright__ = 'Copyright (C) 2017 Tempesta Technologies, Inc.'
 __license__ = 'GPL2'
 
-from helpers import control, tempesta, nginx, tf_cfg, deproxy, chains, remote
+from helpers import control, tempesta, nginx, tf_cfg
+from helpers import deproxy, chains, remote, stateful
+from testers import stress
 from . import multi_backend
 
-import unittest
-import threading
+import sys
+import os
 import time
 import select
 import asyncore
+import multiprocessing
 
-class AddingBackendNewSG(unittest.TestCase):
+class DeadtimeClient(stateful.Stateful):
+    """ Client for deadtime measuring """
+    long_times = 0
+    wait = False
+
+    def __init__(self, uri='/', max_deadtime=1, timeout=20):
+        self.uri = uri
+        self.timeout = timeout
+        self.max_deadtime = max_deadtime
+        self.stop_procedures = [self.__stop]
+        self.client = deproxy.Client()
+        self.client.set_tester(self)
+        self.message_chains = [chains.base()]
+
+    def clear_stats(self):
+        self.long_times = 0
+
+    def run_start(self):
+        self.proc = multiprocessing.Process(target=self.run)
+        self.proc.start()
+
+    def __stop(self):
+        # required for force_stop
+        if self.proc:
+            self.proc.join()
+            self.long_times = self.proc.exitcode
+        self.proc = None
+
+    def loop(self, timeout):
+        """Poll for socket events no more than `timeout` seconds."""
+        self.wait = True
+        try:
+            eta = time.time() + timeout
+            s_map = asyncore.socket_map
+
+            if hasattr(select, 'poll'):
+                poll_fun = asyncore.poll2
+            else:
+                poll_fun = asyncore.poll
+
+            while self.wait and (eta > time.time()):
+                poll_fun(eta - time.time(), s_map)
+        except asyncore.ExitNow:
+            pass
+
+    def recieved_response(self, response):
+        self.wait = False
+
+    def is_srvs_ready(self):
+        return True
+
+    def request(self, timeout):
+        for self.current_chain in self.message_chains:
+            self.recieved_chain = deproxy.MessageChain.empty()
+            self.client.clear()
+            self.client.set_request(self.current_chain.request)
+            self.loop(timeout)
+
+    def run(self):
+        long_times = 0
+        short_times = 0
+        max_delay = 0
+        start_time = time.time()
+        success_time = start_time
+        curtime = start_time
+        self.client.start()
+        while curtime - start_time < self.timeout:
+            self.request(self.timeout)
+            curtime = time.time()
+            delay = curtime - success_time
+            if delay > self.max_deadtime:
+                long_times += 1
+            else:
+                short_times += 1
+            if delay > max_delay:
+                max_delay = delay
+            success_time = curtime
+
+        delay = curtime - success_time
+        if delay > self.max_deadtime:
+            long_times += 1
+        if delay > max_delay:
+                max_delay = delay
+        tf_cfg.dbg(3, "short times: %i" % short_times)
+        tf_cfg.dbg(3, "long times: %i" % long_times)
+        tf_cfg.dbg(3, "max delay: %f" % max_delay)
+        self.client.stop()
+        sys.exit(long_times)
+
+class DontModifyBackend(stress.StressTest):
     """ 1 backend in server group """
     num_attempts = 10
-    max_deadtime = 1
+    max_deadtime = 2
     num_extra_interfaces = 8
     num_extra_ports = 32
     ips = []
     normal_servers = 0
     config = "cache 0;\n"
-    long_deadtime = 0
-    short_deadtime = 0
     base_port = 16384
     wait = True
-
-    def create_tempesta(self):
-        """ Normally no override is needed.
-        Create controller for TempestaFW and add all servers to default group.
-        """
-        self.tempesta = control.Tempesta()
+    client = None
+    configurator = None
 
     def setUp(self):
-        self.client = None
-        self.tempesta = None
-        self.servers = []
-        self.create_tempesta()
         tf_cfg.dbg(2, "Creating interfaces")
         self.interface = tf_cfg.cfg.get('Server', 'aliases_interface')
         self.base_ip = tf_cfg.cfg.get('Server',   'aliases_base_ip')
         self.ips = multi_backend.create_interfaces(self.interface,
                            self.base_ip, self.num_extra_interfaces + 1)
+        stress.StressTest.setUp(self)
 
     def tearDown(self):
-        unittest.TestCase.tearDown(self)
-        asyncore.close_all()
-        if self.client:
-            self.client.stop("Client")
-        if self.tempesta:
-            self.tempesta.stop("Tempesta")
-        for server in self.servers:
-            server.stop("Server")
+        has_base_excpt = False
+        # stopping client
+        if self.client != None:
+            self.client.stop()
+        # stopping tempesta and servers
+        try:
+            stress.StressTest.tearDown(self)
+        except Exception as exc:
+            has_base_excpt = True
+            excpt = exc
         tf_cfg.dbg(2, "Removing interfaces")
-        multi_backend.remove_interface(self.interface, self.ips[0])
+        for ip in self.ips:
+            multi_backend.remove_interface(self.interface, ip)
         self.ips = []
+        if has_base_excpt:
+            raise excpt
+        if self.client.state == stateful.STATE_ERROR:
+            raise Exception("Error while stopping client")
 
     def configure_tempesta(self):
         """ Configure tempesta 1 port in group """
@@ -63,7 +153,6 @@ class AddingBackendNewSG(unittest.TestCase):
                       server.conns_n)
         self.tempesta.config.add_sg(sg)
         self.append_extra_server_groups()
-        return
 
     def append_server_group(self, id):
         sg = tempesta.ServerGroup('new-%i' % id)
@@ -82,14 +171,9 @@ class AddingBackendNewSG(unittest.TestCase):
                 self.tempesta.config.add_sg(sg)
                 sgid += 1
 
-    def create_client(self):
+    def create_clients(self):
         """ Override to set desired list of benchmarks and their options. """
-        self.client = deproxy.Client()
-        self.client.set_tester(self)
-        self.message_chains = [chains.base()]
-
-    def is_srvs_ready(self):
-        return True
+        self.client = DeadtimeClient()
 
     def setup_nginx_config(self, config):
         config.enable_multi_accept()
@@ -124,81 +208,39 @@ class AddingBackendNewSG(unittest.TestCase):
             self.setup_nginx_config(server.config)
             self.servers.append(server)
 
-    def loop(self, timeout=None):
-        """Poll for socket events no more than `self.timeout`
-           or `timeout` seconds."""
-        timeout = 1
-        self.wait = True
-        try:
-            eta = time.time() + timeout
-            s_map = asyncore.socket_map
-
-            if hasattr(select, 'poll'):
-                poll_fun = asyncore.poll2
-            else:
-                poll_fun = asyncore.poll
-
-            while self.wait and (eta > time.time()):
-                poll_fun(eta - time.time(), s_map)
-        except asyncore.ExitNow:
-            pass
-
-    def recieved_response(self, response):
-        self.wait = False
-
-    def run_test(self):
-        for self.current_chain in self.message_chains:
-            self.recieved_chain = deproxy.MessageChain.empty()
-            self.client.clear()
-            self.client.set_request(self.current_chain.request)
-            self.loop()
-
-    @staticmethod
-    def run_tester(self, timeout):
-        start_time = time.time()
-        success_time = start_time
-        curtime = start_time
-        while curtime - start_time < timeout:
-            self.run_test()
-            curtime = time.time()
-            if True:
-                if curtime - success_time > self.max_deadtime:
-                    self.long_deadtime += 1
-                else:
-                    self.short_deadtime += 1
-                success_time = curtime
-            if curtime - start_time > timeout:
-                break
-
-        if curtime - success_time > self.max_deadtime:
-            self.long_deadtime += 1
-
     def pre_test(self):
-        self.tempesta.config.set_defconfig(self.config)
-        self.create_servers()
-        self.configure_tempesta()
+        remote.server.run_cmd("sysctl -w net.core.somaxconn=8192")
+        remote.server.run_cmd("sysctl -w net.ipv4.tcp_max_orphans=1000000")
+        remote.tempesta.run_cmd("sysctl -w net.core.somaxconn=8192")
+        remote.tempesta.run_cmd("sysctl -w net.ipv4.tcp_max_orphans=1000000")
+        remote.client.run_cmd("sysctl -w net.core.somaxconn=8192")
+        remote.client.run_cmd("sysctl -w net.ipv4.tcp_max_orphans=1000000")
+
         for server in self.servers:
             server.start()
 
-        remote.tempesta.run_cmd("sysctl -w net.core.somaxconn=8192")
-        remote.tempesta.run_cmd("sysctl -w net.ipv4.tcp_max_orphans=1000000")
-
+        self.tempesta.config.set_defconfig(self.config)
+        self.configure_tempesta()
         self.tempesta.start()
-        self.create_client()
         self.client.start()
 
-        self.long_deadtime = 0
-        self.short_deadtime = 0
-
-        self.thr = threading.Thread(target=self.run_tester,
-                        args=(self, 2*self.num_attempts*self.max_deadtime))
-        self.thr.start()
-
     def post_test(self):
-        self.thr.join(timeout=1)
-        tf_cfg.dbg(2, "LONG: %i, SHORT: %i" %
-                   (self.long_deadtime, self.short_deadtime))
-        assert self.long_deadtime == 0, 'Too long deadtime'
+        self.client.stop()
+        self.assert_clients()
+
+    def assert_clients(self):
+        assert self.client.long_times == 0, 'Too long deadtime'
+
+    def reconfigure_tempesta(self, i):
+        self.append_server_group(i)
+        self.tempesta.reload()
+
+    def test(self):
+        self.pre_test()
+        time.sleep(self.num_attempts * self.max_deadtime)
+        self.post_test()
+
+class AddingBackendNewSG(DontModifyBackend):
 
     def test(self):
         self.pre_test()
@@ -208,7 +250,7 @@ class AddingBackendNewSG(unittest.TestCase):
             time.sleep(self.max_deadtime)
         self.post_test()
 
-class RemovingBackendSG(AddingBackendNewSG):
+class RemovingBackendSG(DontModifyBackend):
     num_attempts = 10
     max_deadtime = 1
 
@@ -235,7 +277,7 @@ class RemovingBackendSG(AddingBackendNewSG):
             time.sleep(self.max_deadtime)
         self.post_test()
 
-class ChangingSG(AddingBackendNewSG):
+class ChangingSG(DontModifyBackend):
     num_attempts = 10
     max_deadtime = 1
     def_sg = None

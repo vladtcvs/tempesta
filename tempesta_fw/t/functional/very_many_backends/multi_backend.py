@@ -37,7 +37,11 @@ def create_interface(iface_id, base_iface_name, base_ip):
 def remove_interface(interface_name, iface_ip):
     """ Remove interface """
     template = "LANG=C ip address del %s/24 dev %s"
-    remote.server.run_cmd(template % (iface_ip, interface_name))
+    try:
+        tf_cfg.dbg(3, "Removing ip %s" % iface_ip)
+        remote.server.run_cmd(template % (iface_ip, interface_name))
+    except:
+        tf_cfg.dbg(3, "Interface alias already removed")
 
 def create_interfaces(base_interface_name,  base_interface_ip, number_of_ip):
     """ Create specified amount of interface aliases """
@@ -49,7 +53,8 @@ def create_interfaces(base_interface_name,  base_interface_ip, number_of_ip):
 
 def remove_interfaces(base_interface_name, ips):
     """ Remove previously created interfaces """
-    remove_interface(base_interface_name, ips[0])
+    for ip in ips:
+        remove_interface(base_interface_name, ip)
 
 class MultipleBackends(stress.StressTest):
     """ Testing for 1M backends """
