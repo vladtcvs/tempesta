@@ -66,11 +66,12 @@ class MultipleBackends(stress.StressTest):
     def create_servers(self):
         self.interface = tf_cfg.cfg.get('Server', 'aliases_interface')
         self.base_ip = tf_cfg.cfg.get('Server',   'aliases_base_ip')
-        self.ips = create_interfaces(self.interface, self.base_ip, self.num_interfaces)
+        self.ips = create_interfaces(self.interface, self.base_ip,
+                                     self.num_interfaces)
         for ip in self.ips:
             server = control.Nginx(listen_port=self.base_port, \
-                                   listen_ports=self.num_listeners_per_interface, \
-                                   listen_ip=ip)
+                                listen_ports=self.num_listeners_per_interface, \
+                                listen_ip=ip)
             self.servers.append(server)
 
     def configure_tempesta(self):
@@ -79,7 +80,8 @@ class MultipleBackends(stress.StressTest):
         for server in self.servers:
             for listener in server.config.listeners:
                 server_group = tempesta.ServerGroup('default-%i' % sgid)
-                server_group.add_server(server.ip, listener.port, server.conns_n)
+                server_group.add_server(server.ip, listener.port,
+                                        server.conns_n)
                 self.tempesta.config.add_sg(server_group)
                 sgid = sgid + 1
 

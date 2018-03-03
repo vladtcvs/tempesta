@@ -424,8 +424,8 @@ class Nginx(stateful.Stateful):
         self.stats_ask_times += 1
         # In default tests configuration Nginx status available on
         # `nginx_status` page.
-        for i in range(len(self.config.listeners)):
-            uri = 'http://%s:%d/nginx_status' % (self.node.host, self.config.listeners[i].port)
+        for listener in self.config.listeners:
+            uri = 'http://%s:%d/nginx_status' % (self.node.host, listener.port)
             cmd = 'curl %s' % uri
             out, _ = remote.client.run_cmd(
                 cmd, err_msg=(self.err_msg % ('get stats of', self.get_name())))

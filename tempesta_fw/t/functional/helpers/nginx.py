@@ -105,7 +105,8 @@ events {
         pidfile = os.path.join(self.workdir, self.pidfile_name)
         cfg_main = self.main_template % (pidfile,
                      self.worker_processes, self.worker_rlimit_nofile)
-        cfg_events = self.events_template % (self.multi_accept, self.worker_connections)
+        cfg_events = self.events_template % \
+             (self.multi_accept, self.worker_connections)
 
         http_options = self.http_options_template % \
             (self.keepalive_timeout, self.keepalive_requests)
@@ -154,7 +155,8 @@ events {
             return
         nw = int(workers)
         if nw > max_workers:
-            tf_cfg.dbg(1, 'Too much (%i) workers requested. Only %i is possible' % (nw, max_workers))
+            tf_cfg.dbg(1, 'Too much (%i) workers requested. ' \
+                    'Only %i is possible' % (nw, max_workers))
             nw = max_workers
         self.worker_processes = str(nw)
         self.build_config()

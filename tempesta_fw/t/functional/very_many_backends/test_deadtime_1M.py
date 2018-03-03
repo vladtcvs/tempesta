@@ -39,8 +39,8 @@ class AddingBackendNewSG(unittest.TestCase):
         tf_cfg.dbg(2, "Creating interfaces")
         self.interface = tf_cfg.cfg.get('Server', 'aliases_interface')
         self.base_ip = tf_cfg.cfg.get('Server',   'aliases_base_ip')
-        self.ips = multi_backend.create_interfaces(self.interface, self.base_ip,
-                                                   self.num_extra_interfaces + 1)
+        self.ips = multi_backend.create_interfaces(self.interface,
+                           self.base_ip, self.num_extra_interfaces + 1)
 
     def tearDown(self):
         unittest.TestCase.tearDown(self)
@@ -59,7 +59,8 @@ class AddingBackendNewSG(unittest.TestCase):
         """ Configure tempesta 1 port in group """
         sg = tempesta.ServerGroup('default')
         server = self.servers[0]
-        sg.add_server(server.ip, server.config.listeners[0].port, server.conns_n)
+        sg.add_server(server.ip, server.config.listeners[0].port,
+                      server.conns_n)
         self.tempesta.config.add_sg(sg)
         self.append_extra_server_groups()
         return
@@ -124,7 +125,8 @@ class AddingBackendNewSG(unittest.TestCase):
             self.servers.append(server)
 
     def loop(self, timeout=None):
-        """Poll for socket events no more than `self.timeout` or `timeout` seconds."""
+        """Poll for socket events no more than `self.timeout`
+           or `timeout` seconds."""
         timeout = 1
         self.wait = True
         try:
@@ -188,12 +190,14 @@ class AddingBackendNewSG(unittest.TestCase):
         self.long_deadtime = 0
         self.short_deadtime = 0
 
-        self.thr = threading.Thread(target=self.run_tester, args=(self, 2*self.num_attempts*self.max_deadtime))
+        self.thr = threading.Thread(target=self.run_tester,
+                        args=(self, 2*self.num_attempts*self.max_deadtime))
         self.thr.start()
 
     def post_test(self):
         self.thr.join(timeout=1)
-        tf_cfg.dbg(2, "LONG: %i, SHORT: %i" % (self.long_deadtime, self.short_deadtime))
+        tf_cfg.dbg(2, "LONG: %i, SHORT: %i" %
+                   (self.long_deadtime, self.short_deadtime))
         assert self.long_deadtime == 0, 'Too long deadtime'
 
     def test(self):
@@ -215,7 +219,8 @@ class RemovingBackendSG(AddingBackendNewSG):
         """ Configure tempesta 1 port in group """
         sg = tempesta.ServerGroup('default')
         server = self.servers[0]
-        sg.add_server(server.ip, server.config.listeners[0].port, server.conns_n)
+        sg.add_server(server.ip, server.config.listeners[0].port,
+                      server.conns_n)
         self.tempesta.config.add_sg(sg)
         self.append_extra_server_groups()
         for i in range(self.num_attempts):
@@ -240,7 +245,8 @@ class ChangingSG(AddingBackendNewSG):
         sg = tempesta.ServerGroup('default')
         self.def_sg = sg
         server = self.servers[0]
-        sg.add_server(server.ip, server.config.listeners[0].port, server.conns_n)
+        sg.add_server(server.ip, server.config.listeners[0].port,
+                      server.conns_n)
         self.tempesta.config.add_sg(sg)
         self.append_extra_server_groups()
         return
@@ -249,7 +255,8 @@ class ChangingSG(AddingBackendNewSG):
         self.pre_test()
         for i in range(self.num_attempts):
             server = self.servers[1]
-            self.def_sg.add_server(server.ip, server.config.listeners[i].port, server.conns_n)
+            self.def_sg.add_server(server.ip,
+                server.config.listeners[i].port, server.conns_n)
             self.tempesta.reload()
             time.sleep(self.max_deadtime)
         self.post_test()

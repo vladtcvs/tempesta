@@ -29,7 +29,8 @@ class CloseOnShutdown(stress.StressTest):
 
                 self.assertEqual(
                     expected_conns, estab_conns,
-                    msg=('Got %d (expected %d) established connections to server %s'
+                    msg=('Got %d (expected %d) established '
+                         'connections to server %s'
                          % (estab_conns, expected_conns, server_ip_port)))
 
                 if expext_failed is None:
@@ -37,7 +38,8 @@ class CloseOnShutdown(stress.StressTest):
                 failed_conns_exp = server.conns_n if expext_failed else 0
                 self.assertEqual(
                     failed_conns, failed_conns_exp,
-                    msg=('Got %d (expected %d) opened but not established connections to server %s'
+                    msg=('Got %d (expected %d) opened but not established '
+                         'connections to server %s'
                          % (failed_conns, failed_conns_exp, server_ip_port)))
 
     def check_before_start(self):
