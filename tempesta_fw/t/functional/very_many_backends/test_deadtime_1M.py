@@ -73,6 +73,7 @@ class DeadtimeClient(stateful.Stateful):
             self.loop(timeout)
 
     def run(self):
+        num_req = 0
         long_times = 0
         short_times = 0
         max_delay = 0
@@ -91,6 +92,9 @@ class DeadtimeClient(stateful.Stateful):
             if delay > max_delay:
                 max_delay = delay
             success_time = curtime
+            num_req += 1
+            if num_req % 1000 == 0:
+                tf_cfg.dbg(3, "%i requests done" % num_req)
 
         delay = curtime - success_time
         if delay > self.max_deadtime:
@@ -188,7 +192,7 @@ class DontModifyBackend(stress.StressTest):
 
     def create_servers(self):
         self.servers = []
-        #default server
+        # default server
         defport=tempesta.upstream_port_start_from()
         server = control.Nginx(listen_port=defport)
         self.setup_nginx_config(server.config)
@@ -245,6 +249,7 @@ class AddingBackendNewSG(DontModifyBackend):
     def test(self):
         self.pre_test()
         for i in range(self.num_attempts):
+            tf_cfg.dbg(2, "Adding server group #%i" % i)
             self.append_server_group(i)
             self.tempesta.reload()
             time.sleep(self.max_deadtime)
@@ -272,6 +277,7 @@ class RemovingBackendSG(DontModifyBackend):
     def test(self):
         self.pre_test()
         for i in range(self.num_attempts):
+            tf_cfg.dbg(2, "Removing server group #%i" % i)
             self.remove_server_group(i)
             self.tempesta.reload()
             time.sleep(self.max_deadtime)
@@ -296,9 +302,11 @@ class ChangingSG(DontModifyBackend):
     def test(self):
         self.pre_test()
         for i in range(self.num_attempts):
+            tf_cfg.dbg(2, "Adding new server to default group")
             server = self.servers[1]
             self.def_sg.add_server(server.ip,
                 server.config.listeners[i].port, server.conns_n)
             self.tempesta.reload()
             time.sleep(self.max_deadtime)
         self.post_test()
+
