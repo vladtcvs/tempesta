@@ -27,17 +27,20 @@ class DeadtimeClient(stateful.Stateful):
         self.client = deproxy.Client()
         self.client.set_tester(self)
         self.message_chains = [chains.base()]
+        self.finish_event = multiprocessing.Event()
 
     def clear_stats(self):
         self.long_times = 0
 
     def run_start(self):
-        self.proc = multiprocessing.Process(target=self.run)
+        self.proc = multiprocessing.Process(target=self.run,
+                                            args=(self.finish_event,))
         self.proc.start()
 
     def __stop(self):
-        # required for force_stop
+        # 'if' is required for force_stop
         if self.proc:
+            self.finish_event.set()
             self.proc.join()
             self.long_times = self.proc.exitcode
         self.proc = None
@@ -72,16 +75,18 @@ class DeadtimeClient(stateful.Stateful):
             self.client.set_request(self.current_chain.request)
             self.loop(timeout)
 
-    def run(self):
+    def run(self, finish_event):
         num_req = 0
         long_times = 0
         short_times = 0
         max_delay = 0
+        min_delay = -1
         start_time = time.time()
         success_time = start_time
         curtime = start_time
         self.client.start()
-        while curtime - start_time < self.timeout:
+        while (curtime - start_time < self.timeout or self.timeout < 0) and \
+              not finish_event.is_set():
             self.request(self.timeout)
             curtime = time.time()
             delay = curtime - success_time
@@ -91,9 +96,11 @@ class DeadtimeClient(stateful.Stateful):
                 short_times += 1
             if delay > max_delay:
                 max_delay = delay
+            if delay < min_delay or min_delay == -1:
+                min_delay = delay
             success_time = curtime
             num_req += 1
-            if num_req % 1000 == 0:
+            if num_req % 10000 == 0:
                 tf_cfg.dbg(3, "%i requests done" % num_req)
 
         delay = curtime - success_time
@@ -104,6 +111,11 @@ class DeadtimeClient(stateful.Stateful):
         tf_cfg.dbg(3, "short times: %i" % short_times)
         tf_cfg.dbg(3, "long times: %i" % long_times)
         tf_cfg.dbg(3, "max delay: %f" % max_delay)
+        tf_cfg.dbg(3, "min delay: %f" % min_delay)
+        if finish_event.is_set():
+            tf_cfg.dbg(3, "Finish event recieved")
+        else:
+            tf_cfg.dbg(3, "No finish event recieved")
         self.client.stop()
         sys.exit(long_times)
 
@@ -177,7 +189,7 @@ class DontModifyBackend(stress.StressTest):
 
     def create_clients(self):
         """ Override to set desired list of benchmarks and their options. """
-        self.client = DeadtimeClient()
+        self.client = DeadtimeClient(timeout=-1)
 
     def setup_nginx_config(self, config):
         config.enable_multi_accept()
@@ -251,7 +263,10 @@ class AddingBackendNewSG(DontModifyBackend):
         for i in range(self.num_attempts):
             tf_cfg.dbg(2, "Adding server group #%i" % i)
             self.append_server_group(i)
+            t1 = time.time()
             self.tempesta.reload()
+            t2 = time.time()
+            tf_cfg.dbg(4, "tempesta.reload() %f s" % (t2-t1))
             time.sleep(self.max_deadtime)
         self.post_test()
 
@@ -279,7 +294,10 @@ class RemovingBackendSG(DontModifyBackend):
         for i in range(self.num_attempts):
             tf_cfg.dbg(2, "Removing server group #%i" % i)
             self.remove_server_group(i)
+            t1 = time.time()
             self.tempesta.reload()
+            t2 = time.time()
+            tf_cfg.dbg(4, "tempesta.reload() %f s" % (t2-t1))
             time.sleep(self.max_deadtime)
         self.post_test()
 
@@ -306,7 +324,10 @@ class ChangingSG(DontModifyBackend):
             server = self.servers[1]
             self.def_sg.add_server(server.ip,
                 server.config.listeners[i].port, server.conns_n)
+            t1 = time.time()
             self.tempesta.reload()
+            t2 = time.time()
+            tf_cfg.dbg(4, "tempesta.reload() %f s" % (t2-t1))
             time.sleep(self.max_deadtime)
         self.post_test()
 
