@@ -11,12 +11,14 @@ class TempestaTestResult(unittest.TextTestResult):
     matcher = None
 
     def addError(self, test, err):
+        print ("ERR = %s" % err)
         unittest.TextTestResult.addError(self, test, err)
 
     def addExpectedFailure(self, test, err):
         unittest.TextTestResult.addExpectedFailure(self, test, err)
 
     def addFailure(self, test, err):
+        print ("FAIL = %s" % err)
         unittest.TextTestResult.addFailure(self, test, err)
 
     def addSkip(self, test, reason):
